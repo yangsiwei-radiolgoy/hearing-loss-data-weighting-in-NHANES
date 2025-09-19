@@ -57,36 +57,36 @@ results_table <- tbl_svysummary(
   bold_labels() %>%
   italicize_levels()
 ## t test between group
-pta_results <- svyby(~independent variable, ~group, NHANES_design, svymean, na.rm=TRUE)
+pta_results <- svyby(~independentvariable, ~group, NHANES_design, svymean, na.rm=TRUE)
 print(pta_results)
 # adding 95%CI
 pta_results <- pta_results %>%
   mutate(
-    lower_ci = independent variable - 1.96 * se,
-    upper_ci = independent variable + 1.96 * se
+    lower_ci = independentvariable - 1.96 * se,
+    upper_ci = independentvariable + 1.96 * se
   )
 pta_results
-t_test_result <- svyttest(independent variable ~ group, design = NHANES_design)
+t_test_result <- svyttest(independentvariable ~ group, design = NHANES_design)
 t_test_result
 ## ANOVA
-svyby(~independent variable, 
+svyby(~independentvariable, 
       ~group, 
       NHANES_design, 
       svymean, 
       na.rm = TRUE)
 ## model fitting in svyglm 
-model_PTA <- svyglm( independent variable ~ group, design = NHANES_design)
+model_PTA <- svyglm( independentvariable ~ group, design = NHANES_design)
 
 anova_age <- regTermTest(model_PTA, ~group, method = "Wald")
 
 ## results
 print(anova_age)
-pta_results <- svyby(~independent variable, ~group, NHANES_design, svymean, na.rm=TRUE)
+pta_results <- svyby(~independentvariable, ~group, NHANES_design, svymean, na.rm=TRUE)
 print(pta_results)
 pta_results <- pta_results %>%
   mutate(
-    lower_ci = independent variable - 1.96 * se,
-    upper_ci = independent variable + 1.96 * se
+    lower_ci = independentvariable - 1.96 * se,
+    upper_ci = independentvariable + 1.96 * se
   )
 pta_results
 
@@ -95,6 +95,7 @@ pta_results
 subpop_level2and3  <-  subset(NHANES_design,  laterality  !='group$level1')  
 pairwise <- svyttest(independent variable ~group , design = subpop_level2and3)
 print(pairwise)
+
 ## univariate regression
  Sex_model <- svyglm(
   PI~ + Sex  ,
@@ -102,4 +103,103 @@ print(pairwise)
   family = quasibinomial() 
 )
 summary(Sex_model)  
+
+## obtaining univariate regression OR and 95 % CI  
+library(broom)
+
+model_tidy <- tidy(Sex_model, conf.int = TRUE, exponentiate = TRUE)
+Sex_results <- model_tidy %>%
+  filter(term == "Sexmale") %>%
+  mutate(across(c(estimate, conf.low, conf.high), ~ round(., 2)),
+         CI_95 = paste0(conf.low, "-", conf.high)) %>%
+  select(term, estimate, CI_95, p.value)
+colnames(Sex_results) <- c("Variable", "OR", "95% CI", "p-value")
+print(Sex_results)
+
+## detecting interaction effect
+summary(NHANES_design)
+inter_model <- svyglm(
+  PI~  independentvariable *factor(group),
+   
+  design = NHANES_design,
+  family = quasibinomial()# 使用quasibinomial代替binomial以适应调查数据
+)
+summary(inter_model)
+## multivariate regression
+PI_model <- svyglm(
+  PI~  + fomula ,
+  design = NHANES_design,
+  family = quasibinomial()# 使用quasibinomial代替binomial以适应调查数据
+)
+summary(PI_model)
+## model results
+model_results <- data.frame(
+  variable =names(coef(PI_model)),
+  OR =exp(coef(PI_model)),
+  lower_CI =exp(confint(PI_model))[,1],
+  upper_CI =exp(confint(PI_model))[,2]
+)
+## subgroup analysis
+elderly_subpop  <-  subset(NHANES_design,  Age  >=  60)  
+dim(elderly_subpop)
+## running codes of multivariate regression
+
+##  calculating differece between level1-level 2 and level1-level 3
+svy_model <- svyglm(independentvariable ~ group, 
+                    design = NHANES_design)
+
+## Calculate differences between groups
+library(emmeans)
+emmeans_results <- emmeans(
+  svy_model, 
+  specs = ~ group,
+  infer = TRUE
+)
+## Define Comparisons and Compare Differences
+contrast_comparison <- contrast(
+  emmeans_results,
+  method = list(
+    "level1 vs level2" = c(-1, 1, 0),    
+    "level1 vs level3" = c(-1, 0, 1)  
+  )
+)
+ 
+diff_test <- test(
+  contrast(
+    emmeans_results,
+    method = list("(level1 vs level2) - (level1 vs level3)" = c(0, 1, -1))
+  )
+)
+
+print("results were:", quote = FALSE)
+print(contrast_comparison)
+
+print("\n The difference test of two differences:", quote = FALSE)
+print(diff_test)
+
+## mediating analyses
+# mediated variable model
+model_mediator <- svyglm(
+  mediatedvariable ~ independentvariable,
+  design =  design
+)
+
+# outcome variable model
+model_outcome <- svyglm(
+   PI ~ independentvariable+ mediatedvariable  ,
+  design =  design,
+  family = quasibinomial()  # 二元结局使用二项分布
+)
+set.seed(123)  
+med_results <- mediate(
+  model.m = model_mediator,
+  model.y = model_outcome,
+  treat = "independentvariable",       
+  mediator = "mediatedvariable",   
+  boot = TRUE,         
+  sims = 1000,         
+  robustSE = TRUE      
+)
+
+
 
