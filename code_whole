@@ -1,0 +1,105 @@
+library(plyr)
+library(dplyr) 
+library(arsenal)
+library(survey) #For analysis in the case of weighting
+library(foreign)
+
+rm(list = ls())
+outcome.data<-read.csv("the file pathway")
+has_na <- any(is.na(outcome.data$WTSAU2YR)) # check weighting data
+print(has_na)
+
+outcome.data$PI<-factor(outcome.data$PI,levels = c("0", "1"),labels = c("Non-postural instability","Postural instability")) 
+##....... Variable factorization
+
+outcome.data$adjusted_weight  <-outcome.data$WTSAU2YR/2
+
+NHANES_design <- svydesign(
+  data = outcome.data, 
+  ids = ~SDMVPSU, 
+  strata = ~SDMVSTRA, 
+  nest = TRUE, 
+  weights = ~adjusted_weight # 多个周期需调整 adjusted_weight
+)
+summary(NHANES_design)
+## baseline 
+results_table <- tbl_svysummary(
+  NHANES_design,
+  by = PI,  # grouped by PI
+  include = c(variable1, variable2,......),
+  type = list(variable1 ~ "continuous", variable2 ~ "categorical",
+              ....),
+  statistic = list(
+    all_continuous() ~ "{mean} ({sd})",
+    all_categorical() ~ "{n} ({p}%)"
+  ),
+  digits = list(
+    all_continuous() ~ 1,
+    all_categorical() ~ c(0, 1)
+  ),
+  missing = "no"  # 不显示缺失值行
+) %>%
+  add_p(
+    test = list(
+      all_continuous() ~ "svy.t.test",
+      all_categorical() ~ "svy.chisq.test"
+    ),
+    pvalue_fun = ~ style_pvalue(.x, digits = 3)
+  ) %>%
+  modify_header(
+    label = "**variable**",
+    p.value = "**P-value**"
+  ) %>%
+  modify_spanning_header(
+    c("stat_1", "stat_2") ~ "**PI group**"
+  ) %>%
+  modify_caption("title") %>%
+  bold_labels() %>%
+  italicize_levels()
+## t test between group
+pta_results <- svyby(~independent variable, ~group, NHANES_design, svymean, na.rm=TRUE)
+print(pta_results)
+# adding 95%CI
+pta_results <- pta_results %>%
+  mutate(
+    lower_ci = independent variable - 1.96 * se,
+    upper_ci = independent variable + 1.96 * se
+  )
+pta_results
+t_test_result <- svyttest(independent variable ~ group, design = NHANES_design)
+t_test_result
+## ANOVA
+svyby(~independent variable, 
+      ~group, 
+      NHANES_design, 
+      svymean, 
+      na.rm = TRUE)
+## model fitting in svyglm 
+model_PTA <- svyglm( independent variable ~ group, design = NHANES_design)
+
+anova_age <- regTermTest(model_PTA, ~group, method = "Wald")
+
+## results
+print(anova_age)
+pta_results <- svyby(~independent variable, ~group, NHANES_design, svymean, na.rm=TRUE)
+print(pta_results)
+pta_results <- pta_results %>%
+  mutate(
+    lower_ci = independent variable - 1.96 * se,
+    upper_ci = independent variable + 1.96 * se
+  )
+pta_results
+
+## post-hoc（Tukey HSD）
+# select two ones of three levels
+subpop_level2and3  <-  subset(NHANES_design,  laterality  !='group$level1')  
+pairwise <- svyttest(independent variable ~group , design = subpop_level2and3)
+print(pairwise)
+## univariate regression
+ Sex_model <- svyglm(
+  PI~ + Sex  ,
+  design = NHANES_design,
+  family = quasibinomial() 
+)
+summary(Sex_model)  
+
